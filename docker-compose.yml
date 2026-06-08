@@ -1,18 +1,44 @@
-version: "3.9"
+version: '3.8'
 
 services:
-  postgres:
-    image: postgres:15
-    container_name: real_estate_postgres
+  db:
+    image: postgres:15-alpine
+    container_name: real_estate_db
     restart: always
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin123
       POSTGRES_DB: real_estate
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: real_estate_backend
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    environment:
+      # 告訴 FastAPI 連線到這個 Docker 網路內的 db 容器
+      - DATABASE_URL=postgresql://admin:admin123@db:5432/real_estate
+      - PYTHONPATH=/app
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: real_estate_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
 
 volumes:
   postgres_data:

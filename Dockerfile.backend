@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+# 設定工作目錄直接進入 src
+WORKDIR /app/src
+
+# 複製 requirements.txt 到容器的 /app (上一層)
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# 複製所有原始碼到容器的 /app/src
+COPY . /app/
+
+# 啟動時直接執行 src 裡面的 api_main
+CMD ["uvicorn", "api_main:app", "--host", "0.0.0.0", "--port", "8000"]

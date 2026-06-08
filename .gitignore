@@ -3,3 +3,7 @@ __pycache__/
 data/
 *.zip
 .env
+*.sql
+*.csv
+.dockerignore
+.gitignore
