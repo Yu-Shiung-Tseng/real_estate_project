@@ -1,3 +1,6 @@
+import os
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
@@ -14,7 +17,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_URL = "postgresql://admin:admin123@db:5432/real_estate"
+load_dotenv()
+DB_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin123@localhost:5433/real_estate")
+
+if not DB_URL:
+    raise ValueError("⚠️ 環境變數 DATABASE_URL 尚未設定！請檢查 .env 檔或 Render 雲端設定。")
+
 engine = create_engine(DB_URL)
 
 @app.get("/api/districts")

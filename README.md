@@ -2,177 +2,47 @@
 
 以台灣內政部實價登錄資料為基礎建置的全端資料分析平台，提供房價趨勢查詢、區域分析與資料探索功能。
 
-本專案展示了從資料蒐集、ETL、自動化資料更新、資料庫設計到前後端開發的完整流程。
+本專案展示了從資料蒐集 (ETL)、自動化管線、Docker 容器化微服務架構，到使用 Cloudflare Tunnel 實現零信任 (Zero Trust) 雲端部署的完整軟體工程實踐。
 
 ---
 
 ## 📌 Project Overview
 
-實價登錄資料量龐大且更新頻繁，因此建立了一套自動化流程，定期下載、整理並匯入 PostgreSQL，讓使用者能透過網頁介面快速查詢與分析不動產交易資料。
+實價登錄資料量龐大且更新頻繁，為此建立了一套自動化爬蟲與清洗流程，並將全端應用程式封裝為 Docker 容器，透過 Cloudflare 安全通道對外提供高可用性的 Web 服務。
 
-### 主要功能
-
-- 自動下載最新實價登錄資料
-- ETL 資料轉換與清洗流程
-- PostgreSQL 資料儲存與查詢優化
-- 房價趨勢分析
-- 區域交易資料查詢
-- RESTful API 服務
-- 響應式前端介面
+### 🌟 核心亮點功能
+- **自動化 ETL 管線**：一鍵爬取內政部最新季度資料，自動合併、去重並增量匯入 PostgreSQL。
+- **資料防護與清洗**：透過 SQL 邏輯排除極端防呆數值（如純土地/車位、畸零面積、極端單價）。
+- **容器化微服務架構**：使用 Docker-Compose 整合前端 (Nginx)、後端 (FastAPI) 與資料庫，實現地端/雲端環境一致性。
+- **零信任安全部署 (Zero Trust)**：導入 Cloudflare Tunnel 進行內網穿透與反向代理，無須暴露公網 IP 或開放防火牆，即享有 SSL 加密與邊緣節點防護。
+- **前後端分離與反向代理**：由 Nginx 統一收斂對外 Port 80 流量，並透過 `proxy_pass` 解決跨域 (CORS) 限制。
 
 ---
 
 ## 🛠 Tech Stack
 
-### Frontend
-
-- React
-- Vite
-- JavaScript
-- Axios
-
-### Backend
-
-- FastAPI
-- Python
-- SQLAlchemy
-- Pandas
-
-### Database
-
-- PostgreSQL
-
-### Deployment
-
-- GitHub Pages
-- Render
+- **Frontend**: React, Vite, Material Tailwind, ECharts (Axios)
+- **Backend**: FastAPI, Python 3.11, SQLAlchemy, Pandas
+- **Database**: PostgreSQL 15
+- **DevOps & Cloud**: Docker, Docker-Compose, Nginx, Cloudflare Tunnel (Zero Trust)
 
 ---
 
 ## 🏗 System Architecture
 
 ```text
-User
- │
+User (Web Browser / Mobile)
+ │ 🌐 [https://doban.uk](https://doban.uk) (Cloudflare Edge Network / SSL)
  ▼
-React (GitHub Pages)
- │
+Cloudflare Tunnel (Secure Zero Trust Connection)
+ │ 🔒 Local Network (e.g., 192.168.x.x:80)
  ▼
-FastAPI
- │
- ▼
-PostgreSQL
-(Local Machine)
-```
-
----
-
-## 🔄 Data Pipeline
-
-### 1. Extract
-
-自動下載最新實價登錄資料檔案。
-
-### 2. Transform
-
-- 轉換縣市代碼
-- 整理資料格式
-- 合併不同交易類型資料
-
-### 3. Load
-
-- 增量匯入 PostgreSQL
-- 避免重複資料寫入
-
-### 4. Clean
-
-- 排除異常交易資料
-- 過濾不完整紀錄
-- 提升分析資料品質
-
----
-
-## ⚡ Database Optimization
-
-為改善查詢效能，針對常用搜尋條件建立索引：
-
-- City / Township 組合索引
-- 條件索引（Partial Index）
-- Materialized View 加速統計查詢
-
-透過索引與預先計算統計資料，降低查詢時間並提升使用體驗。
-
----
-
-## 🔐 Configuration & Security
-
-- 使用 `.env` 管理環境變數
-- 資料庫連線資訊不提交至版本控制
-- 敏感資訊透過環境變數讀取
-
----
-
-## 📂 Project Structure
-
-```text
-real_estate_ai/
-│
-├── src/
-│   ├── api_main.py
-│   ├── extract_real_estate.py
-│   ├── translator.py
-│   ├── loader.py
-│   └── db_cleaner.py
-│
-├── frontend/
-│   ├── src/
-│   └── vite.config.js
-│
-├── docker-compose.yml
-├── requirements.txt
-└── README.md
-```
-
----
-
-## 🚀 Getting Started
-
-### Environment Variables
-
-```env
-DATABASE_URL=postgresql://username:password@host:5432/database
-```
-
-### Run with Docker
-
-```bash
-docker-compose up -d --build
-```
-
-### Update Data
-
-```bash
-python src/extract_real_estate.py
-```
-
----
-
-## 📈 Future Improvements
-
-- 地圖視覺化分析
-- 房價預測模型
-- 使用者收藏與比較功能
-- 更多統計分析指標
-
----
-
-## 👨‍💻 Skills Demonstrated
-
-- Full-Stack Development
-- REST API Design
-- Data Engineering (ETL)
-- PostgreSQL Database Design
-- Query Optimization
-- Data Cleaning & Processing
-- Docker Deployment
-- Frontend / Backend Integration
+[ Docker Compose Environment ]
+┌────────────────────────────────────────────────────────┐
+│  Nginx (Frontend & Reverse Proxy - Port 80)            │
+│   ├─ React (Serve Static Files & Dashboard UI)         │
+│   └─ /api/* ───► FastAPI (Backend Service - Port 8000) │
+│                    │                                   │
+│                    ▼                                   │
+│                 PostgreSQL (Database - Port 5432)      │
+└────────────────────────────────────────────────────────┘

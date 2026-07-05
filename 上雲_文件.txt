@@ -1,0 +1,48 @@
+🌐 1. 雲端與通道：Cloudflare Tunnel
+這是你這次架構中最有含金量的一環。你沒有像傳統做法那樣去動家用路由器的 Port Forwarding（這很不安全），而是實現了零信任網路（Zero Trust）架構。
+
+我們設定了什麼：我們在 Cloudflare 申請了專屬網域 doban.uk，並在你的電腦裝了 cloudflared 通道程式。
+
+它是怎麼串的：Cloudflare 的邊緣伺服器接管了你的網域 DNS。當全世界任何一個人輸入 https://doban.uk 時，Cloudflare 會把流量加密，透過專屬通道直接送到你電腦的實體內網 IP（192.168.50.117:80），完美繞過防火牆。
+
+🖥️ 2. 前端與流量總管：React + Nginx
+前端不只是純畫面，它還肩負了「大門警衛」的重責大任。
+
+我們設定了什麼：你用 Docker 將編譯好的 React 靜態檔案包進了 Nginx 伺服器中，並對外開放 Port 80。
+
+它是怎麼串的：
+
+處理畫面：當 Tunnel 把流量送到 192.168.50.117:80 時，Nginx 會把 React 的 index.html 網頁派發給使用者的瀏覽器。
+
+處理 API (反向代理)：這是最精彩的設定！當你的前端發送帶有 /api/ 的請求時，Nginx 會攔截下來，把它轉發到內部的後端容器。這直接消滅了最讓人頭痛的跨網域（CORS）問題！
+
+⚙️ 3. 後端邏輯核心：FastAPI
+你的 Python 後端被安全地保護在 Docker 的虛擬內網中，不直接面對外網的狂風暴雨。
+
+我們設定了什麼：透過 docker-compose，我們起了一個名為 real_estate_backend 的容器，運行在 Port 8000。
+
+它是怎麼串的：它不直接和 Cloudflare 溝通。它只靜靜地聽從同在 Docker 網路裡面的 Nginx 總管的指揮。Nginx 把 /api/districts 轉交過來，FastAPI 就負責執行對應的 Python 函數。
+
+🗄️ 4. 數據大腦：PostgreSQL
+所有珍貴的台灣房價資料都鎖在這裡。
+
+我們設定了什麼：起了一個名為 real_estate_db 的容器，並設定了專屬的帳號密碼與資料庫名稱。
+
+它是怎麼串的：FastAPI 透過 SQLAlchemy，使用內部網域名稱 db:5432 來連線。因為是在 Docker-Compose 的同一個 Bridge Network 裡，後端可以直接呼叫 db 這個名字找到資料庫，完全不需要透過外部 IP。
+
+🚀 總結：一趟資料的奇幻旅程
+想像一下，當你拿起手機，在畫面上選擇「臺中市」並點擊查詢時，實際上發生了這樣的事：
+
+[手機] 呼叫 https://doban.uk/api/districts?city=臺中市。
+
+[Cloudflare] 驗證這是安全的流量，透過 Tunnel 丟進你家電腦的 192.168.50.117:80。
+
+[Nginx (前端容器)] 收到後說：「哦！這是 /api/ 開頭的，我不處理畫面，我幫你轉交給後端老兄。」
+
+[FastAPI (後端容器)] 收到任務，轉身向內部網路大喊：「喂！db:5432，給我臺中市的資料！」
+
+[PostgreSQL (資料庫容器)] 算出結果，交給 FastAPI。
+
+FastAPI 轉成 JSON ➔ Nginx ➔ Tunnel ➔ 手機畫面出現精美的圖表！
+
+架構已經無懈可擊了！現在基礎建設都穩定了，接下來你是想優先優化資料庫的查詢效能（例如加上索引應付大數據），還是想先微調前端 Dashboard 的視覺設計呢？

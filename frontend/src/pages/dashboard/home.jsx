@@ -20,12 +20,12 @@ import {
 } from "@heroicons/react/24/solid";
 import { StatisticsCard } from "@/widgets/cards";
 import axios from "axios";
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
-// 💡 建立一個客製化的 axios 實例
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const api = axios.create({
   baseURL: API_BASE_URL,
 });
+
 import ReactECharts from "echarts-for-react";
 import * as echarts from "echarts";
 
@@ -180,7 +180,7 @@ export function Home() {
     const params = getFilterParams();
     params.append("mode", mapMode); // 額外加入 map 專屬參數
 
-    axios.get("/api/map-data", { params })
+    api.get("/api/map-data", { params })
       .then((res) => {
         const normalizedData = res.data.map((item) => ({
           ...item,
@@ -194,7 +194,7 @@ export function Home() {
 
   useEffect(() => {
     if (selectedCity) {
-      axios.get(`/api/districts`, { params: { city: selectedCity } })
+      api.get(`/api/districts`, { params: { city: selectedCity } })
         .then((res) => {
           setDistricts(res.data);
           setSelectedDistrict("all");
@@ -209,11 +209,11 @@ export function Home() {
   useEffect(() => {
     const params = getFilterParams();
 
-    axios.get("/api/stats", { params })
+    api.get("/api/stats", { params })
       .then((res) => setStats(res.data))
       .catch((err) => console.error("獲取統計資料失敗:", err));
 
-    axios.get("/api/transactions", { params })
+    api.get("/api/transactions", { params })
       .then((res) => {
         setDetailList(res.data);
         setCurrentPage(1);
@@ -230,7 +230,7 @@ export function Home() {
 
     const params = getFilterParams();
 
-    axios.get("/api/trends", { params })
+    api.get("/api/trends", { params })
       .then((res) => setTrendData(res.data))
       .catch((err) => console.error("獲取走勢資料失敗:", err));
 
@@ -341,20 +341,21 @@ export function Home() {
           data: trendData.map((d) => d.district_volume), 
           barMaxWidth: 35, 
           itemStyle: { 
-            
             color: "rgba(147, 197, 253, 0.4)", 
             borderRadius: [4, 4, 0, 0] 
           },
         },
+        // ⚠️ 修正這裡：把原本重複的 selectedCity 改成 district_avg
         {
-          name: `${selectedCity}單價`,
+          name: `${districtName}單價`, // 1. 名字改成行政區
           type: "line",
           yAxisIndex: 0,
-          data: trendData.map((d) => d.city_avg),
+          data: trendData.map((d) => d.district_avg), // 2. 數據對應到區平均
           smooth: true,
           symbolSize: 6,
-          lineStyle: { width: 2, type: "dashed", color: "#F44336" },
-          itemStyle: { color: "#F44336" },
+          // 3. 建議換成藍色實線，這樣跟紅色的城市虛線才有明顯對比
+          lineStyle: { width: 3, type: "solid", color: "#2196F3" }, 
+          itemStyle: { color: "#2196F3" },
         },
         {
           name: `${selectedCity}單價`,
