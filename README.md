@@ -46,3 +46,8 @@ Cloudflare Tunnel (Secure Zero Trust Connection)
 │                    ▼                                   │
 │                 PostgreSQL (Database - Port 5432)      │
 └────────────────────────────────────────────────────────┘
+
+
+## 💡 Acknowledgments
+本專案的 UI 介面參考並使用了 [Material Tailwind Dashboard React](https://www.material-tailwind.com/)。
+感謝其提供的專業 Dashboard 元件庫，大幅提升了開發效率與介面一致性。
