@@ -7,6 +7,7 @@ import {
   RectangleStackIcon,
 } from "@heroicons/react/24/solid";
 import { Home, Profile, Tables, Notifications } from "@/pages/dashboard";
+import { AboutPage, PrivacyPolicyPage, TermsDisclaimerPage } from "@/pages/legal";
 import { SignIn, SignUp } from "@/pages/auth";
 
 const icon = {
@@ -22,6 +23,24 @@ export const routes = [
         name: "dashboard",
         path: "/home",
         element: <Home />,
+      },
+      {
+        icon: <InformationCircleIcon {...icon} />,
+        name: "about",
+        path: "/about",
+        element: <AboutPage />,
+      },
+      {
+        icon: <InformationCircleIcon {...icon} />,
+        name: "privacy",
+        path: "/privacy",
+        element: <PrivacyPolicyPage />,
+      },
+      {
+        icon: <InformationCircleIcon {...icon} />,
+        name: "terms",
+        path: "/terms",
+        element: <TermsDisclaimerPage />,
       },
       /* ⚠️ 已隱藏其餘功能頁面
       {

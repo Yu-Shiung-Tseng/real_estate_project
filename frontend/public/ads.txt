@@ -1,0 +1,5 @@
+# Google AdSense ads.txt
+# After your Google AdSense account is approved for doban.uk:
+# 1. Replace pub-XXXXXXXXXXXXXXXX with your Publisher ID (without the "ca-" prefix).
+# 2. Uncomment the line below and rebuild/redeploy the frontend container.
+# google.com, pub-XXXXXXXXXXXXXXXX, DIRECT, f08c47fec0942fa0

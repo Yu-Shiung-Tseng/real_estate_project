@@ -5,3 +5,4 @@ export * from "@/widgets/layout/footer";
 export * from "@/widgets/layout/navbar";
 export * from "@/widgets/layout/mobile-notice-modal";
 export * from "@/widgets/layout/ad-popup-modal";
+export * from "@/widgets/layout/ad-banner";

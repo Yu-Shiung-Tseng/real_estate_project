@@ -17,9 +17,10 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ArrowsUpDownIcon,
+  SparklesIcon,
 } from "@heroicons/react/24/solid";
-import { StatisticsCard } from "@/widgets/cards";
-import { AdPopupModal } from "@/widgets/layout";
+import { StatisticsCard, AiValuationCard } from "@/widgets/cards";
+import { AdBanner } from "@/widgets/layout";
 import axios from "axios";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -99,6 +100,9 @@ export function Home() {
     avg_age: 0,
   });
   const [trendData, setTrendData] = useState([]);
+  const [showForecast, setShowForecast] = useState(true);
+  const [forecastData, setForecastData] = useState(null);
+  const [isForecastLoading, setIsForecastLoading] = useState(false);
   const [detailList, setDetailList] = useState([]);
 
   // 新增：列表功能狀態
@@ -157,7 +161,7 @@ export function Home() {
     selectedTypes.some((type) => !activeFilters.types.includes(type));
 
   const estimatedTotalPriceWan = mortgageInput.unitPrice * mortgageInput.pings + mortgageInput.parkingPrice;
-  const minDownPaymentWan = estimatedTotalPriceWan * 0.2;
+  const minDownPaymentWan = Number((estimatedTotalPriceWan * 0.2).toFixed(1));
   const effectiveDownPaymentWan = Math.max(mortgageInput.downPayment, minDownPaymentWan);
   const loanAmountWan = estimatedTotalPriceWan - effectiveDownPaymentWan;
   const loanPct = estimatedTotalPriceWan > 0 ? (loanAmountWan / estimatedTotalPriceWan) * 100 : 0;
@@ -315,13 +319,54 @@ export function Home() {
     };
   }, [activeFilters, viewMode]);
 
+  // ==========================================
+  // C-2. 機器學習未來 4 季走勢預測 (依賴 activeFilters)
+  // ==========================================
+  useEffect(() => {
+    if (viewMode !== "chart" || !showForecast) return;
+
+    let isCancelled = false;
+    const params = buildFilterParams(activeFilters);
+    params.append("horizon", "4");
+
+    setIsForecastLoading(true);
+    setForecastData(null);
+
+    api
+      .get("/api/ml/forecast", { params })
+      .then((res) => {
+        if (!isCancelled) setForecastData(res.data);
+      })
+      .catch((err) => {
+        console.error("獲取 AI 趨勢預測失敗:", err);
+        if (!isCancelled) setForecastData(null);
+      })
+      .finally(() => {
+        if (!isCancelled) setIsForecastLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeFilters, viewMode, showForecast]);
+
+  const handleApplyAiToMortgage = ({ unitPrice, pings, parkingPrice }) => {
+    const newTotal = unitPrice * pings + parkingPrice;
+    setMortgageInput({
+      unitPrice,
+      pings,
+      parkingPrice,
+      downPayment: Number((newTotal * 0.2).toFixed(1)),
+    });
+  };
+
   useEffect(() => {
     if (stats.avg_price > 0) {
       const newTotal = stats.avg_price * mortgageInput.pings + mortgageInput.parkingPrice;
       setMortgageInput((prev) => ({
         ...prev,
         unitPrice: stats.avg_price,
-        downPayment: newTotal * 0.2,
+        downPayment: Number((newTotal * 0.2).toFixed(1)),
       }));
     }
   }, [stats.avg_price]);
@@ -374,28 +419,147 @@ export function Home() {
     const districtName = activeFilters.district === "all" ? "全區" : activeFilters.district;
     const cityName = activeFilters.city;
 
+    const histLabels = trendData.map((d) => `${d.year}-Q${d.season}`);
+    const lastHistLabel = histLabels[histLabels.length - 1];
+    const lastActualPrice = trendData.length > 0 ? Number(trendData[trendData.length - 1].district_avg) : null;
+
+    const hasValidForecast =
+      showForecast &&
+      forecastData?.available &&
+      Array.isArray(forecastData.forecast) &&
+      forecastData.forecast.length > 0 &&
+      trendData.length > 0 &&
+      forecastData.last_actual_quarter === lastHistLabel;
+
+    const forecastPoints = hasValidForecast ? forecastData.forecast : [];
+    const forecastLabels = forecastPoints.map((p) => p.label);
+    const allLabels = [...histLabels, ...forecastLabels];
+    const forecastPad = Array(forecastPoints.length).fill(null);
+    const forecastByLabel = Object.fromEntries(forecastPoints.map((p) => [p.label, p]));
+
+    const legendData = [`${districtName}交易量`, `${districtName}單價`, `${cityName}單價`];
+    if (hasValidForecast) {
+      legendData.push("AI 預測單價");
+    }
+
+    const series = [
+      {
+        name: `${districtName}交易量`,
+        type: "bar",
+        yAxisIndex: 1,
+        data: [...trendData.map((d) => d.district_volume), ...forecastPad],
+        barMaxWidth: 35,
+        itemStyle: {
+          color: "rgba(147, 197, 253, 0.4)",
+          borderRadius: [4, 4, 0, 0],
+        },
+      },
+      {
+        name: `${districtName}單價`,
+        type: "line",
+        yAxisIndex: 0,
+        data: [...trendData.map((d) => d.district_avg), ...forecastPad],
+        smooth: true,
+        symbolSize: 6,
+        lineStyle: { width: 3, type: "solid", color: "#2196F3" },
+        itemStyle: { color: "#2196F3" },
+      },
+      {
+        name: `${cityName}單價`,
+        type: "line",
+        yAxisIndex: 0,
+        data: [...trendData.map((d) => d.city_avg), ...forecastPad],
+        smooth: true,
+        symbolSize: 6,
+        lineStyle: { width: 2, type: "dashed", color: "#F44336" },
+        itemStyle: { color: "#F44336" },
+      },
+    ];
+
+    if (hasValidForecast && lastActualPrice != null) {
+      const preNulls = Array(Math.max(0, trendData.length - 1)).fill(null);
+
+      // 80% 信賴區間帶（利用 ECharts 堆疊面積繪製下界 + 差值帶）
+      series.push(
+        {
+          name: "__band_lower",
+          type: "line",
+          yAxisIndex: 0,
+          stack: "ai-confidence-band",
+          data: [...preNulls, lastActualPrice, ...forecastPoints.map((p) => p.lower_bound)],
+          smooth: true,
+          symbol: "none",
+          silent: true,
+          lineStyle: { opacity: 0 },
+          areaStyle: { opacity: 0 },
+          tooltip: { show: false },
+        },
+        {
+          name: "__band_upper",
+          type: "line",
+          yAxisIndex: 0,
+          stack: "ai-confidence-band",
+          data: [
+            ...preNulls,
+            0,
+            ...forecastPoints.map((p) => Number((p.upper_bound - p.lower_bound).toFixed(2))),
+          ],
+          smooth: true,
+          symbol: "none",
+          silent: true,
+          lineStyle: { opacity: 0 },
+          areaStyle: { color: "rgba(124, 58, 237, 0.14)" },
+          tooltip: { show: false },
+        },
+        {
+          name: "AI 預測單價",
+          type: "line",
+          yAxisIndex: 0,
+          data: [...preNulls, lastActualPrice, ...forecastPoints.map((p) => p.predicted_price)],
+          smooth: true,
+          symbol: "diamond",
+          symbolSize: 7,
+          lineStyle: { width: 3, type: "dashed", color: "#7C3AED" },
+          itemStyle: { color: "#7C3AED" },
+        }
+      );
+    }
+
     return {
       tooltip: {
         trigger: "axis",
-        axisPointer: { type: "cross" }, // 滑鼠移上時顯示十字準星
+        axisPointer: { type: "cross" },
         formatter: (params) => {
-          let res = `<div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid #ccc;padding-bottom:4px;">${params[0].name}</div>`;
+          if (!params || params.length === 0) return "";
+          const axisLabel = params[0].name;
+          const isForecastQuarter = Boolean(forecastByLabel[axisLabel]);
+          let res = `<div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid #ccc;padding-bottom:4px;">${axisLabel}${
+            isForecastQuarter ? ' <span style="color:#7C3AED;">(AI 預測)</span>' : ""
+          }</div>`;
+
           params.forEach((p) => {
-            // 根據 seriesType 動態決定單位是「萬/坪」還是「筆」
+            if (!p.seriesName || p.seriesName.startsWith("__band_") || p.value == null) return;
+            if (!isForecastQuarter && p.seriesName === "AI 預測單價") return;
             const unit = p.seriesType === "bar" ? "筆" : "萬/坪";
             res += `${p.marker} ${p.seriesName}: <span style="font-weight:bold;">${p.value} ${unit}</span><br/>`;
           });
+
+          if (isForecastQuarter) {
+            const fp = forecastByLabel[axisLabel];
+            res += `<div style="margin-top:4px;color:#6D28D9;font-size:12px;">80% 預測區間：<b>${fp.lower_bound} ~ ${fp.upper_bound} 萬/坪</b></div>`;
+          }
+
           return res;
         },
       },
       legend: {
-        data: [`${districtName}交易量`, `${districtName}單價`, `${cityName}單價`],
+        data: legendData,
         bottom: 0,
       },
       grid: { left: "3%", right: "4%", bottom: "10%", containLabel: true },
       xAxis: {
         type: "category",
-        data: trendData.map((d) => `${d.year}-Q${d.season}`),
+        data: allLabels,
         axisPointer: { type: "shadow" },
       },
       yAxis: [
@@ -403,51 +567,17 @@ export function Home() {
           type: "value",
           name: "單價 (萬/坪)",
           position: "left",
-          splitLine: { lineStyle: { color: "#f1f5f9" } }, 
+          splitLine: { lineStyle: { color: "#f1f5f9" } },
         },
         {
           type: "value",
           name: "交易量 (筆)",
           position: "right",
-          splitLine: { show: false }, 
-          max: (value) => Math.ceil(value.max * 4), 
+          splitLine: { show: false },
+          max: (value) => Math.ceil((value.max || 10) * 4),
         },
       ],
-      series: [
-        {
-          name: `${districtName}交易量`,
-          type: "bar",
-          yAxisIndex: 1, 
-          data: trendData.map((d) => d.district_volume), 
-          barMaxWidth: 35, 
-          itemStyle: { 
-            color: "rgba(147, 197, 253, 0.4)", 
-            borderRadius: [4, 4, 0, 0] 
-          },
-        },
-        // ⚠️ 修正這裡：把原本重複的 selectedCity 改成 district_avg
-        {
-          name: `${districtName}單價`, // 1. 名字改成行政區
-          type: "line",
-          yAxisIndex: 0,
-          data: trendData.map((d) => d.district_avg), // 2. 數據對應到區平均
-          smooth: true,
-          symbolSize: 6,
-          // 3. 建議換成藍色實線，這樣跟紅色的城市虛線才有明顯對比
-          lineStyle: { width: 3, type: "solid", color: "#2196F3" }, 
-          itemStyle: { color: "#2196F3" },
-        },
-        {
-          name: `${cityName}單價`,
-          type: "line",
-          yAxisIndex: 0,
-          data: trendData.map((d) => d.city_avg),
-          smooth: true,
-          symbolSize: 6,
-          lineStyle: { width: 2, type: "dashed", color: "#F44336" },
-          itemStyle: { color: "#F44336" },
-        },
-      ],
+      series,
     };
   };
 
@@ -491,9 +621,7 @@ export function Home() {
   };
 
   return (
-    <div className="mt-12 flex flex-col gap-8">
-      <AdPopupModal />
-
+    <div className="mt-8 flex flex-col gap-8">
       {/* 頂部三欄位佈局 */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
         {/* === 左欄：進階篩選與房貸 === */}
@@ -631,13 +759,13 @@ export function Home() {
         <div className="md:col-span-6">
           <Card className="h-[920px]">
             <CardBody className="flex flex-col h-full">
-              <div className="flex justify-between items-center mb-8">
+              <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
                 <div>
                   <Typography variant="h5" color="blue-gray">
                     {viewMode === "chart" ? `${activeFilters.city}${activeFilters.district === "all" ? "" : activeFilters.district} 房價強弱走勢` : "全台行政區房價熱力分佈"}
                   </Typography>
                   <Typography variant="small" className="text-blue-gray-400 font-normal mt-1">
-                    {viewMode === "chart" ? "對照縣市大盤之相對趨勢分析" : "基於最新實價登錄之區域分佈"}
+                    {viewMode === "chart" ? "對照縣市大盤之相對趨勢與 AI 未來 4 季預測" : "基於最新實價登錄之區域分佈"}
                   </Typography>
                 </div>
                 <div className="flex flex-col items-end gap-2">
@@ -649,6 +777,20 @@ export function Home() {
                       熱力圖
                     </button>
                   </div>
+                  {viewMode === "chart" && (
+                    <button
+                      type="button"
+                      onClick={() => setShowForecast((prev) => !prev)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                        showForecast
+                          ? "bg-purple-50 text-purple-700 border-purple-200 shadow-sm"
+                          : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
+                      }`}
+                    >
+                      <SparklesIcon className="h-3.5 w-3.5" />
+                      AI 未來 4 季預測：{showForecast ? "開啟" : "關閉"}
+                    </button>
+                  )}
                   {viewMode === "map" && (
                     <div className="flex bg-orange-50 p-1 rounded-lg border border-orange-100">
                       <button onClick={() => setMapMode("price")} className={`px-3 py-1.5 text-[11px] font-bold rounded-md transition-all ${mapMode === "price" ? "bg-orange-500 text-white shadow-sm" : "text-orange-800 hover:bg-orange-100"}`}>
@@ -661,6 +803,45 @@ export function Home() {
                   )}
                 </div>
               </div>
+
+              {viewMode === "chart" && showForecast && (
+                <div className="mb-4 rounded-xl border border-purple-100 bg-purple-50/60 px-4 py-2.5 text-xs text-purple-900 flex flex-wrap items-center justify-between gap-2">
+                  {isForecastLoading ? (
+                    <span className="font-medium text-purple-700">AI 時間序列模型運算未來 4 季走勢中...</span>
+                  ) : forecastData?.available ? (
+                    <>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 font-bold ${
+                            forecastData.expected_change_pct >= 1.5
+                              ? "bg-green-100 text-green-800"
+                              : forecastData.expected_change_pct <= -1.5
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
+                        >
+                          {forecastData.trend_direction}
+                        </span>
+                        <span>
+                          預估至 <strong>{forecastData.forecast[forecastData.forecast.length - 1]?.label}</strong>：
+                          <strong className="text-purple-800 ml-1">
+                            {forecastData.final_predicted_price} 萬/坪
+                          </strong>
+                          （{forecastData.expected_change_pct >= 0 ? "+" : ""}
+                          {forecastData.expected_change_pct}%）
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-purple-700/80">
+                        回測誤差 MAPE {forecastData.backtest_mape}% · 參考近 {forecastData.training_quarters} 季
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-purple-700/80">
+                      {forecastData?.reason || "歷史季度資料不足，暫無法顯示 AI 趨勢預測"}
+                    </span>
+                  )}
+                </div>
+              )}
 
               <div className="flex-grow">
                 {viewMode === "chart" ? (
@@ -692,6 +873,17 @@ export function Home() {
           <StatisticsCard title="平均成交屋齡" value={stats.avg_age ? `${Number(stats.avg_age).toFixed(1)} 年` : "無資料"} color="indigo" icon={<ClockIcon className="h-7 w-7 text-white" />} />
         </div>
       </div>
+
+      {/* --- AI 智慧單戶估價模組 --- */}
+      <AiValuationCard
+        cities={cities}
+        activeCity={activeFilters.city}
+        activeDistrict={activeFilters.district}
+        onApplyToMortgage={handleApplyAiToMortgage}
+      />
+
+      {/* --- Google AdSense 合規頁面橫幅廣告位 --- */}
+      <AdBanner slotName="實價登錄分析橫幅廣告位" />
 
       {/* --- 下半部：成交清單 (加入搜尋、排序、分頁) --- */}
       <Card className="overflow-hidden shadow-lg border border-blue-gray-100">

@@ -1,10 +1,12 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 from typing import List, Optional
+
+from ml_engine import ValuationModelService, forecast_quarterly_trend
 
 app = FastAPI(title="Real Estate AI API")
 
@@ -24,6 +26,16 @@ if not DB_URL:
     raise ValueError("⚠️ 環境變數 DATABASE_URL 尚未設定！請檢查 .env 檔或 Render 雲端設定。")
 
 engine = create_engine(DB_URL)
+valuation_service = ValuationModelService()
+
+
+class PricePredictRequest(BaseModel):
+    city: str = Field(..., min_length=1, description="縣市名稱，例如 臺中市")
+    district: Optional[str] = Field("all", description="行政區名稱或 all")
+    building_type: str = Field("住宅大樓", description="建物型態")
+    building_pings: float = Field(..., gt=0, le=500, description="建物坪數")
+    building_age: Optional[float] = Field(None, ge=0, le=100, description="屋齡（年），可為空")
+    parking_price: float = Field(0.0, ge=0, le=5000, description="車位總價（萬元）")
 
 @app.get("/api/districts")
 def get_districts(city: str):
@@ -243,3 +255,90 @@ def get_map_data(
     with engine.connect() as conn:
         result = conn.execute(text(query), params).mappings().all()
         return [dict(row) for row in result]
+
+
+# ==========================================
+# ML 機器學習 API：走勢預測 + 單戶 AI 估價
+# ==========================================
+
+@app.get("/api/ml/model-info")
+def get_ml_model_info():
+    """回傳目前線上 AI 估價模型的訓練資訊與驗證指標。"""
+    return valuation_service.get_info()
+
+
+@app.get("/api/ml/forecast")
+def get_price_forecast(
+    city: str,
+    district: Optional[str] = None,
+    min_age: Optional[float] = None,
+    max_age: Optional[float] = None,
+    max_date: Optional[str] = None,
+    building_types: List[str] = Query(None),
+    horizon: int = Query(4, ge=1, le=8),
+):
+    """
+    依據歷史季度實價登錄走勢，透過時間序列 Ridge 季節性模型預測未來 1~8 季單價走勢與 80% 信心區間。
+    故意不以 min_date 截斷歷史，保留足夠長度的近代季度序列供模型學習趨勢與季節性。
+    """
+    dist_where, dist_params = build_filter_query(
+        city, district, None, None, min_age, max_age, building_types, None, max_date, prefix="t."
+    )
+    city_where, city_params = build_filter_query(
+        city, None, None, None, min_age, max_age, building_types, None, max_date, prefix="c."
+    )
+    query = f"""
+        WITH district_trend AS (
+            SELECT
+                year, season,
+                ROUND(AVG(unit_price_per_ping), 2) AS avg_price,
+                COUNT(*) AS volume
+            FROM housing_data_clean t
+            WHERE {dist_where}
+              AND t.year BETWEEN 101 AND 125
+              AND t.season BETWEEN 1 AND 4
+            GROUP BY year, season
+        ),
+        city_trend AS (
+            SELECT
+                year, season,
+                ROUND(AVG(unit_price_per_ping), 2) AS avg_price,
+                COUNT(*) AS volume
+            FROM housing_data_clean c
+            WHERE {city_where}
+              AND c.year BETWEEN 101 AND 125
+              AND c.season BETWEEN 1 AND 4
+            GROUP BY year, season
+        )
+        SELECT
+            d.year, d.season,
+            d.avg_price AS district_avg,
+            d.volume AS district_volume,
+            c.avg_price AS city_avg,
+            c.volume AS city_volume
+        FROM district_trend d
+        JOIN city_trend c ON d.year = c.year AND d.season = c.season
+        ORDER BY d.year, d.season
+    """
+    with engine.connect() as conn:
+        all_params = {**dist_params, **city_params}
+        rows = [dict(row) for row in conn.execute(text(query), all_params).mappings().all()]
+
+    use_district = bool(district and district.strip() != "all")
+    return forecast_quarterly_trend(rows, horizon=horizon, use_district=use_district)
+
+
+@app.post("/api/ml/predict-price")
+def predict_property_price(payload: PricePredictRequest):
+    """使用離線訓練之 HistGradientBoosting 模型估算單戶合理單價與總價區間。"""
+    try:
+        return valuation_service.predict(
+            city=payload.city,
+            district=payload.district,
+            building_type=payload.building_type,
+            building_pings=payload.building_pings,
+            building_age=payload.building_age,
+            parking_price=payload.parking_price,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

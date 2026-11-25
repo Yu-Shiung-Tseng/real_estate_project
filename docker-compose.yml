@@ -24,6 +24,8 @@ services:
       - db
     ports:
       - "8000:8000"
+    volumes:
+      - ./models:/app/models
     environment:
       # 告訴 FastAPI 連線到這個 Docker 網路內的 db 容器
       - DATABASE_URL=postgresql://admin:admin123@db:5432/real_estate
