@@ -40,11 +40,11 @@ def get_districts(city: str):
 
 def build_filter_query(
     city: Optional[str], district: Optional[str], min_price: Optional[float], 
-    max_price: Optional[float], min_age: Optional[int], max_age: Optional[int], 
+    max_price: Optional[float], min_age: Optional[float], max_age: Optional[float], 
     building_types: List[str], min_date: Optional[str] = None, max_date: Optional[str] = None,
     prefix: str = ""
 ):
-    """統一處理過濾條件，使用精確的 city 欄位"""
+    """統一處理過濾條件，使用精確的 city / township 欄位並善用索引"""
     filters = [
         f"{prefix}is_special_transaction = FALSE",
         f"{prefix}transaction_western_date IS NOT NULL"
@@ -54,10 +54,10 @@ def build_filter_query(
     if city:
         # ⚠️ 修正：從 LIKE 改為精確等於
         filters.append(f"{prefix}city = :city")
-        params["city"] = city
-    if district and district != "all":
+        params["city"] = city.strip()
+    if district and district.strip() != "all":
         filters.append(f"{prefix}township = :district")
-        params["district"] = district
+        params["district"] = district.strip()
     if min_price is not None:
         filters.append(f"{prefix}unit_price_per_ping >= :min_price")
         params["min_price"] = min_price
@@ -78,21 +78,21 @@ def build_filter_query(
             params[param_name] = f"%{b_type}%"
         filters.append(f"({' OR '.join(type_conditions)})")
     if min_date:
-        filters.append(f"TO_CHAR({prefix}transaction_western_date, 'YYYY-MM') >= :min_date")
+        filters.append(f"{prefix}transaction_western_date >= TO_DATE(:min_date, 'YYYY-MM')")
         params["min_date"] = min_date
     if max_date:
-        filters.append(f"TO_CHAR({prefix}transaction_western_date, 'YYYY-MM') <= :max_date")
+        filters.append(f"{prefix}transaction_western_date < TO_DATE(:max_date, 'YYYY-MM') + INTERVAL '1 month'")
         params["max_date"] = max_date
 
     return " AND ".join(filters), params
 
-# --- stats, trends, transactions 路由共用 build_filter_query，不需額外大改 ---
+# --- stats, trends, transactions 路由共用 build_filter_query ---
 
 @app.get("/api/stats")
 def get_stats(
     city: Optional[str] = None, district: Optional[str] = None,
     min_price: Optional[float] = None, max_price: Optional[float] = None,
-    min_age: Optional[int] = None, max_age: Optional[int] = None,
+    min_age: Optional[float] = None, max_age: Optional[float] = None,
     min_date: Optional[str] = None, max_date: Optional[str] = None,
     building_types: List[str] = Query(None)
 ):
@@ -105,11 +105,12 @@ def get_stats(
 @app.get("/api/trends")
 def get_trends(
     city: str, district: Optional[str] = None,
+    min_age: Optional[float] = None, max_age: Optional[float] = None,
     min_date: Optional[str] = None, max_date: Optional[str] = None,
     building_types: List[str] = Query(None)
 ):
-    dist_where, dist_params = build_filter_query(city, district, None, None, None, None, building_types, min_date, max_date, prefix="t.")
-    city_where, city_params = build_filter_query(city, None, None, None, None, None, building_types, min_date, max_date, prefix="c.")
+    dist_where, dist_params = build_filter_query(city, district, None, None, min_age, max_age, building_types, min_date, max_date, prefix="t.")
+    city_where, city_params = build_filter_query(city, None, None, None, min_age, max_age, building_types, min_date, max_date, prefix="c.")
     query = f"""
         WITH district_trend AS (
             SELECT 
@@ -144,7 +145,7 @@ def get_trends(
 def get_transactions(
     city: Optional[str] = None, district: Optional[str] = None,
     min_price: Optional[float] = None, max_price: Optional[float] = None,
-    min_age: Optional[int] = None, max_age: Optional[int] = None,
+    min_age: Optional[float] = None, max_age: Optional[float] = None,
     min_date: Optional[str] = None, max_date: Optional[str] = None,
     building_types: List[str] = Query(None)
 ):

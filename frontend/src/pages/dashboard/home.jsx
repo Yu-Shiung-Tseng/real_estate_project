@@ -19,6 +19,7 @@ import {
   ArrowsUpDownIcon,
 } from "@heroicons/react/24/solid";
 import { StatisticsCard } from "@/widgets/cards";
+import { AdPopupModal } from "@/widgets/layout";
 import axios from "axios";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -26,29 +27,65 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
+const getDefaultDateRange = () => {
+  const now = new Date();
+  const max = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const twoYearsAgo = new Date(now.getFullYear() - 2, now.getMonth(), 1);
+  const min = `${twoYearsAgo.getFullYear()}-${String(twoYearsAgo.getMonth() + 1).padStart(2, "0")}`;
+  return { min, max };
+};
+
+const buildFilterParams = (filters) => {
+  const params = new URLSearchParams();
+
+  if (filters.city) params.append("city", filters.city);
+  if (filters.district && filters.district !== "all") params.append("district", filters.district);
+  if (filters.ageRange?.min) params.append("min_age", filters.ageRange.min);
+  if (filters.ageRange?.max) params.append("max_age", filters.ageRange.max);
+  if (filters.dateRange?.min) params.append("min_date", filters.dateRange.min);
+  if (filters.dateRange?.max) params.append("max_date", filters.dateRange.max);
+
+  // 將陣列攤平，產生 building_types=大樓&building_types=透天 的格式
+  if (filters.types?.length > 0) {
+    filters.types.forEach((type) => params.append("building_types", type));
+  }
+
+  return params;
+};
+
 import ReactECharts from "echarts-for-react";
 import * as echarts from "echarts";
 
 export function Home() {
   // ==========================================
-  // 1. 篩選器狀態管理 (移除 priceRange)
+  // 1. 篩選器表單狀態 vs. 實際查詢狀態 (activeFilters)
   // ==========================================
   const [cities] = useState([
     "基隆市", "臺北市", "新北市", "桃園市", "新竹市", "新竹縣", "苗栗縣", "臺中市",
     "彰化縣", "南投縣", "雲林縣", "嘉義市", "嘉義縣", "臺南市", "高雄市", "屏東縣",
     "宜蘭縣", "花蓮縣", "臺東縣", "澎湖縣", "金門縣", "連江縣",
   ]);
+  const [defaultDateRange] = useState(getDefaultDateRange);
+
+  // UI 表單草稿狀態（使用者調整時不直接觸發數據 API）
   const [selectedCity, setSelectedCity] = useState("臺中市");
   const [districts, setDistricts] = useState([]);
   const [selectedDistrict, setSelectedDistrict] = useState("all");
 
   const [selectedTypes, setSelectedTypes] = useState([]);
   const [ageRange, setAgeRange] = useState({ min: "", max: "" });
-  const [dateRange, setDateRange] = useState(() => {
-    const now = new Date();
-    const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    return { min: "2025-01", max: currentYearMonth };
-  });
+  const [dateRange, setDateRange] = useState(() => ({ ...defaultDateRange }));
+
+  // 實際生效的查詢條件（預設：臺中市、全部行政區、近 2 年資料；點擊「執行查詢」才更新）
+  const [activeFilters, setActiveFilters] = useState(() => ({
+    city: "臺中市",
+    district: "all",
+    types: [],
+    ageRange: { min: "", max: "" },
+    dateRange: { ...defaultDateRange },
+  }));
+  const [isSearching, setIsSearching] = useState(false);
+
   const [baseGeoJson, setBaseGeoJson] = useState(null);
 
   // ==========================================
@@ -91,23 +128,33 @@ export function Home() {
     rate: 2.2,
   });
 
-  const getFilterParams = () => {
-    const params = new URLSearchParams();
-
-    if (selectedCity) params.append("city", selectedCity);
-    if (selectedDistrict && selectedDistrict !== "all") params.append("district", selectedDistrict);
-    if (ageRange.min) params.append("min_age", ageRange.min);
-    if (ageRange.max) params.append("max_age", ageRange.max);
-    if (dateRange.min) params.append("min_date", dateRange.min);
-    if (dateRange.max) params.append("max_date", dateRange.max);
-
-    // 將陣列攤平，產生 building_types=大樓&building_types=透天 的格式
-    if (selectedTypes.length > 0) {
-      selectedTypes.forEach(type => params.append("building_types", type));
-    }
-
-    return params;
+  const handleCityChange = (newCity) => {
+    setSelectedCity(newCity);
+    setSelectedDistrict("all");
+    setDistricts([]);
   };
+
+  const handleSearchSubmit = (e) => {
+    if (e) e.preventDefault();
+    setCurrentPage(1);
+    setActiveFilters({
+      city: selectedCity,
+      district: selectedDistrict,
+      types: [...selectedTypes],
+      ageRange: { ...ageRange },
+      dateRange: { ...dateRange },
+    });
+  };
+
+  const hasPendingFilterChanges =
+    selectedCity !== activeFilters.city ||
+    selectedDistrict !== activeFilters.district ||
+    ageRange.min !== activeFilters.ageRange.min ||
+    ageRange.max !== activeFilters.ageRange.max ||
+    dateRange.min !== activeFilters.dateRange.min ||
+    dateRange.max !== activeFilters.dateRange.max ||
+    selectedTypes.length !== activeFilters.types.length ||
+    selectedTypes.some((type) => !activeFilters.types.includes(type));
 
   const estimatedTotalPriceWan = mortgageInput.unitPrice * mortgageInput.pings + mortgageInput.parkingPrice;
   const minDownPaymentWan = estimatedTotalPriceWan * 0.2;
@@ -158,8 +205,8 @@ export function Home() {
   }, []);
 
   useEffect(() => {
-    if (!baseGeoJson || !selectedCity) return;
-    const stdCity = selectedCity.replace(/臺/g, "台");
+    if (!baseGeoJson || !activeFilters.city) return;
+    const stdCity = activeFilters.city.replace(/臺/g, "台");
     const cityFeatures = baseGeoJson.features.filter((f) => f.properties.std_county === stdCity);
     if (cityFeatures.length === 0) return;
 
@@ -168,20 +215,21 @@ export function Home() {
     echarts.registerMap(mapName, cityGeoJson);
     setCurrentMapName(mapName);
     setIsMapLoaded(true);
-  }, [baseGeoJson, selectedCity]);
+  }, [baseGeoJson, activeFilters.city]);
 
   // ==========================================
-  // A-3. 抓取熱力圖數據 (延遲載入拆分 - 3)
+  // A-3. 抓取熱力圖數據 (延遲載入拆分 - 3，依賴 activeFilters)
   // ==========================================
-
   useEffect(() => {
-    if (viewMode !== "map" || !selectedCity) return;
+    if (viewMode !== "map" || !activeFilters.city) return;
 
-    const params = getFilterParams();
+    let isCancelled = false;
+    const params = buildFilterParams(activeFilters);
     params.append("mode", mapMode); // 額外加入 map 專屬參數
 
     api.get("/api/map-data", { params })
       .then((res) => {
+        if (isCancelled) return;
         const normalizedData = res.data.map((item) => ({
           ...item,
           name: item.name.replace(/臺/g, "台"),
@@ -190,51 +238,82 @@ export function Home() {
       })
       .catch((err) => console.error("地圖 API 失敗:", err));
 
-  }, [selectedCity, mapMode, selectedTypes, dateRange, ageRange, viewMode]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeFilters, mapMode, viewMode]);
 
+  // 縣市變更時即時更新行政區選單（不觸發統計／明細／走勢／地圖查詢）
   useEffect(() => {
+    let isCancelled = false;
     if (selectedCity) {
       api.get(`/api/districts`, { params: { city: selectedCity } })
         .then((res) => {
+          if (isCancelled) return;
           setDistricts(res.data);
           setSelectedDistrict("all");
         })
         .catch((err) => console.error("抓取行政區失敗", err));
     }
+    return () => {
+      isCancelled = true;
+    };
   }, [selectedCity]);
 
   // ==========================================
-  // C. 核心數據抓取 (延遲載入拆分 - 1. 常駐查詢)
+  // C. 核心數據抓取 (延遲載入拆分 - 1. 常駐查詢，依賴 activeFilters)
   // ==========================================
   useEffect(() => {
-    const params = getFilterParams();
+    let isCancelled = false;
+    const params = buildFilterParams(activeFilters);
 
-    api.get("/api/stats", { params })
-      .then((res) => setStats(res.data))
+    setIsSearching(true);
+
+    const statsRequest = api
+      .get("/api/stats", { params })
+      .then((res) => {
+        if (!isCancelled) setStats(res.data);
+      })
       .catch((err) => console.error("獲取統計資料失敗:", err));
 
-    api.get("/api/transactions", { params })
+    const transactionsRequest = api
+      .get("/api/transactions", { params })
       .then((res) => {
-        setDetailList(res.data);
-        setCurrentPage(1);
+        if (!isCancelled) {
+          setDetailList(res.data);
+          setCurrentPage(1);
+        }
       })
       .catch((err) => console.error("獲取交易明細失敗:", err));
 
-  }, [selectedCity, selectedDistrict, selectedTypes, ageRange, dateRange]);
+    Promise.allSettled([statsRequest, transactionsRequest]).finally(() => {
+      if (!isCancelled) setIsSearching(false);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeFilters]);
 
   // ==========================================
-  // C-1. 獨立查詢：走勢圖 (延遲載入拆分 - 2)
+  // C-1. 獨立查詢：走勢圖 (延遲載入拆分 - 2，依賴 activeFilters)
   // ==========================================
   useEffect(() => {
     if (viewMode !== "chart") return;
 
-    const params = getFilterParams();
+    let isCancelled = false;
+    const params = buildFilterParams(activeFilters);
 
     api.get("/api/trends", { params })
-      .then((res) => setTrendData(res.data))
+      .then((res) => {
+        if (!isCancelled) setTrendData(res.data);
+      })
       .catch((err) => console.error("獲取走勢資料失敗:", err));
 
-  }, [selectedCity, selectedDistrict, selectedTypes, ageRange, dateRange, viewMode]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeFilters, viewMode]);
 
   useEffect(() => {
     if (stats.avg_price > 0) {
@@ -292,7 +371,8 @@ export function Home() {
   // 6. ECharts 配置 (已更新：雙 Y 軸與交易量柱狀圖)
   // ==========================================
   const getTrendOption = () => {
-    const districtName = selectedDistrict === "all" ? "全區" : selectedDistrict;
+    const districtName = activeFilters.district === "all" ? "全區" : activeFilters.district;
+    const cityName = activeFilters.city;
 
     return {
       tooltip: {
@@ -309,7 +389,7 @@ export function Home() {
         },
       },
       legend: {
-        data: [`${districtName}交易量`, `${districtName}單價`, `${selectedCity}單價`],
+        data: [`${districtName}交易量`, `${districtName}單價`, `${cityName}單價`],
         bottom: 0,
       },
       grid: { left: "3%", right: "4%", bottom: "10%", containLabel: true },
@@ -358,7 +438,7 @@ export function Home() {
           itemStyle: { color: "#2196F3" },
         },
         {
-          name: `${selectedCity}單價`,
+          name: `${cityName}單價`,
           type: "line",
           yAxisIndex: 0,
           data: trendData.map((d) => d.city_avg),
@@ -412,71 +492,97 @@ export function Home() {
 
   return (
     <div className="mt-12 flex flex-col gap-8">
+      <AdPopupModal />
+
       {/* 頂部三欄位佈局 */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-12">
         {/* === 左欄：進階篩選與房貸 === */}
         <div className="md:col-span-3">
           <Card className="h-full">
             <CardBody className="flex flex-col gap-6">
-              <div>
-                <Typography variant="h6" color="blue-gray" className="mb-4">區域搜尋</Typography>
-                <div className="flex flex-col gap-4">
-                  <div className="w-full">
-                    <label className="block text-xs font-bold text-blue-gray-500 mb-1 uppercase">選擇縣市</label>
-                    <select
-                      className="w-full h-11 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-gray-900 focus:outline-none transition-all cursor-pointer"
-                      value={selectedCity}
-                      onChange={(e) => setSelectedCity(e.target.value)}
-                    >
-                      {cities.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
+              <form onSubmit={handleSearchSubmit} className="flex flex-col gap-6">
+                <div>
+                  <Typography variant="h6" color="blue-gray" className="mb-4">區域搜尋</Typography>
+                  <div className="flex flex-col gap-4">
+                    <div className="w-full">
+                      <label className="block text-xs font-bold text-blue-gray-500 mb-1 uppercase">選擇縣市</label>
+                      <select
+                        className="w-full h-11 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-gray-900 focus:outline-none transition-all cursor-pointer"
+                        value={selectedCity}
+                        onChange={(e) => handleCityChange(e.target.value)}
+                      >
+                        {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div className="w-full">
+                      <label className="block text-xs font-bold text-blue-gray-500 mb-1 uppercase">選擇行政區</label>
+                      <select
+                        className="w-full h-11 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-gray-900 focus:outline-none transition-all cursor-pointer"
+                        value={selectedDistrict}
+                        onChange={(e) => setSelectedDistrict(e.target.value)}
+                      >
+                        <option value="all">全部行政區</option>
+                        {districts.map((d) => <option key={d.trim()} value={d.trim()}>{d.trim()}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  <div className="w-full">
-                    <label className="block text-xs font-bold text-blue-gray-500 mb-1 uppercase">選擇行政區</label>
-                    <select
-                      className="w-full h-11 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-gray-900 focus:outline-none transition-all cursor-pointer"
-                      value={selectedDistrict}
-                      onChange={(e) => setSelectedDistrict(e.target.value)}
-                    >
-                      <option value="all">全部行政區</option>
-                      {districts.map((d) => <option key={d.trim()} value={d.trim()}>{d.trim()}</option>)}
-                    </select>
+                </div>
+
+                {/* 交易條件篩選 (移除了價格區間，變更排版) */}
+                <div>
+                  <Typography variant="small" className="font-bold text-blue-gray-500 mb-3 uppercase">
+                    交易條件篩選
+                  </Typography>
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <Input label="最短屋齡" type="number" containerProps={{ className: "!min-w-0" }} value={ageRange.min} onChange={(e) => setAgeRange({ ...ageRange, min: e.target.value })} />
+                    <Input label="最長屋齡" type="number" containerProps={{ className: "!min-w-0" }} value={ageRange.max} onChange={(e) => setAgeRange({ ...ageRange, max: e.target.value })} />
+                  </div>
+                  <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+                    <Input label="起始月份" type="month" containerProps={{ className: "!min-w-0" }} value={dateRange.min} onChange={(e) => setDateRange({ ...dateRange, min: e.target.value })} />
+                    <Input label="結束月份" type="month" containerProps={{ className: "!min-w-0" }} value={dateRange.max} onChange={(e) => setDateRange({ ...dateRange, max: e.target.value })} />
                   </div>
                 </div>
-              </div>
 
-              {/* 交易條件篩選 (移除了價格區間，變更排版) */}
-              <div>
-                <Typography variant="small" className="font-bold text-blue-gray-500 mb-3 uppercase">
-                  交易條件篩選
-                </Typography>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <Input label="最短屋齡" type="number" value={ageRange.min} onChange={(e) => setAgeRange({ ...ageRange, min: e.target.value })} />
-                  <Input label="最長屋齡" type="number" value={ageRange.max} onChange={(e) => setAgeRange({ ...ageRange, max: e.target.value })} />
+                {/* 建物型態 */}
+                <div>
+                  <Typography variant="small" className="font-bold text-blue-gray-500 mb-2 uppercase">建物型態</Typography>
+                  <div className="grid grid-cols-2 gap-1">
+                    {["住宅大樓", "華廈", "公寓", "透天厝"].map((type) => (
+                      <Checkbox
+                        key={type}
+                        label={type}
+                        checked={selectedTypes.includes(type)}
+                        ripple={false}
+                        containerProps={{ className: "p-0" }}
+                        labelProps={{ className: "text-sm font-medium text-blue-gray-700" }}
+                        onChange={(e) => handleTypeChange(type, e.target.checked)}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input label="起始月份" type="month" value={dateRange.min} onChange={(e) => setDateRange({ ...dateRange, min: e.target.value })} />
-                  <Input label="結束月份" type="month" value={dateRange.max} onChange={(e) => setDateRange({ ...dateRange, max: e.target.value })} />
-                </div>
-              </div>
 
-              {/* 建物型態 */}
-              <div>
-                <Typography variant="small" className="font-bold text-blue-gray-500 mb-2 uppercase">建物型態</Typography>
-                <div className="grid grid-cols-2 gap-1">
-                  {["住宅大樓", "華廈", "公寓", "透天厝"].map((type) => (
-                    <Checkbox
-                      key={type}
-                      label={type}
-                      checked={selectedTypes.includes(type)}
-                      ripple={false}
-                      containerProps={{ className: "p-0" }}
-                      labelProps={{ className: "text-sm font-medium text-blue-gray-700" }}
-                      onChange={(e) => handleTypeChange(type, e.target.checked)}
-                    />
-                  ))}
+                {/* 顯式執行查詢按鈕 */}
+                <div>
+                  <Button
+                    type="submit"
+                    color="blue"
+                    size="lg"
+                    fullWidth
+                    className="flex items-center justify-center gap-2 text-sm font-bold shadow-md hover:shadow-lg transition-all"
+                  >
+                    <MagnifyingGlassIcon className="h-4 w-4" />
+                    {isSearching ? "查詢中..." : "執行查詢"}
+                  </Button>
+                  {hasPendingFilterChanges && !isSearching && (
+                    <Typography
+                      variant="small"
+                      className="mt-2 text-center text-xs font-medium text-amber-700"
+                    >
+                      條件已變更，請點擊「執行查詢」更新數據
+                    </Typography>
+                  )}
                 </div>
-              </div>
+              </form>
 
               <hr className="my-2 border-blue-gray-50" />
 
@@ -485,12 +591,12 @@ export function Home() {
                 <Typography variant="h6" color="blue-gray">房貸試算設定</Typography>
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
-                    <Input label="單價 (萬/坪)" type="number" step="0.1" value={mortgageInput.unitPrice} onChange={(e) => setMortgageInput({ ...mortgageInput, unitPrice: parseFloat(e.target.value) || 0 })} />
-                    <Input label="預計坪數" type="number" value={mortgageInput.pings} onChange={(e) => setMortgageInput({ ...mortgageInput, pings: parseFloat(e.target.value) || 0 })} />
+                    <Input label="單價 (萬/坪)" type="number" step="0.1" containerProps={{ className: "!min-w-0" }} value={mortgageInput.unitPrice} onChange={(e) => setMortgageInput({ ...mortgageInput, unitPrice: parseFloat(e.target.value) || 0 })} />
+                    <Input label="預計坪數" type="number" containerProps={{ className: "!min-w-0" }} value={mortgageInput.pings} onChange={(e) => setMortgageInput({ ...mortgageInput, pings: parseFloat(e.target.value) || 0 })} />
                   </div>
-                  <Input label="車位總價 (萬)" type="number" value={mortgageInput.parkingPrice} onChange={(e) => setMortgageInput({ ...mortgageInput, parkingPrice: parseFloat(e.target.value) || 0 })} />
+                  <Input label="車位總價 (萬)" type="number" containerProps={{ className: "!min-w-0" }} value={mortgageInput.parkingPrice} onChange={(e) => setMortgageInput({ ...mortgageInput, parkingPrice: parseFloat(e.target.value) || 0 })} />
                   <div className="relative">
-                    <Input label="自備款 (萬)" type="number" value={mortgageInput.downPayment} onChange={(e) => setMortgageInput({ ...mortgageInput, downPayment: parseFloat(e.target.value) || 0 })} />
+                    <Input label="自備款 (萬)" type="number" containerProps={{ className: "!min-w-0" }} value={mortgageInput.downPayment} onChange={(e) => setMortgageInput({ ...mortgageInput, downPayment: parseFloat(e.target.value) || 0 })} />
                     {mortgageInput.downPayment <= minDownPaymentWan && (
                       <Typography variant="small" color="red" className="absolute -bottom-5 right-0 text-[10px] font-bold">
                         *最低自備款: {Math.round(minDownPaymentWan)} 萬
@@ -498,8 +604,8 @@ export function Home() {
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Input label="貸款成數 (%)" type="number" disabled value={loanPct.toFixed(1)} className="bg-gray-50" />
-                    <Input label="年利率 (%)" type="number" step="0.1" value={loanConfig.rate} onChange={(e) => setLoanConfig({ ...loanConfig, rate: parseFloat(e.target.value) || 0 })} />
+                    <Input label="貸款成數 (%)" type="number" disabled containerProps={{ className: "!min-w-0" }} value={loanPct.toFixed(1)} className="bg-gray-50" />
+                    <Input label="年利率 (%)" type="number" step="0.1" containerProps={{ className: "!min-w-0" }} value={loanConfig.rate} onChange={(e) => setLoanConfig({ ...loanConfig, rate: parseFloat(e.target.value) || 0 })} />
                   </div>
                 </div>
 
@@ -528,7 +634,7 @@ export function Home() {
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <Typography variant="h5" color="blue-gray">
-                    {viewMode === "chart" ? `${selectedCity}${selectedDistrict === "all" ? "" : selectedDistrict} 房價強弱走勢` : "全台行政區房價熱力分佈"}
+                    {viewMode === "chart" ? `${activeFilters.city}${activeFilters.district === "all" ? "" : activeFilters.district} 房價強弱走勢` : "全台行政區房價熱力分佈"}
                   </Typography>
                   <Typography variant="small" className="text-blue-gray-400 font-normal mt-1">
                     {viewMode === "chart" ? "對照縣市大盤之相對趨勢分析" : "基於最新實價登錄之區域分佈"}
@@ -602,8 +708,12 @@ export function Home() {
               <Input
                 type="text"
                 placeholder="搜尋路名或地址..."
+                containerProps={{ className: "!min-w-0" }}
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
                 icon={<MagnifyingGlassIcon className="h-4 w-4 text-gray-400" />}
                 className="bg-white"
               />
