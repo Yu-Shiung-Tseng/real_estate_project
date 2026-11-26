@@ -30,6 +30,11 @@ export function Footer({ brandName, contactEmail }) {
         {/* 右側：站內說明、政策與聯絡方式 */}
         <ul className="flex flex-wrap items-center justify-center gap-4 text-xs font-medium text-blue-gray-600">
           <li>
+            <Link to="/dashboard/risk-watch" className="hover:text-blue-600 transition-colors">
+              解約與賣壓觀察
+            </Link>
+          </li>
+          <li>
             <Link to="/dashboard/about" className="hover:text-blue-600 transition-colors">
               關於本站
             </Link>

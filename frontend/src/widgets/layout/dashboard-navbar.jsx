@@ -3,6 +3,7 @@ import { Navbar, Typography } from "@material-tailwind/react";
 
 const NAV_LINKS = [
   { label: "房價儀表板", to: "/dashboard/home" },
+  { label: "解約與賣壓觀察", to: "/dashboard/risk-watch" },
   { label: "關於本站", to: "/dashboard/about" },
   { label: "隱私權政策", to: "/dashboard/privacy" },
   { label: "免責聲明", to: "/dashboard/terms" },

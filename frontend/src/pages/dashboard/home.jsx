@@ -894,7 +894,9 @@ export function Home() {
             <div>
               <Typography variant="h6" color="blue-gray">最新成交紀錄明細</Typography>
               <Typography variant="small" className="text-blue-gray-400 font-medium italic">
-                顯示符合條件之所有紀錄
+                {stats.total_count > detailList.length && detailList.length > 0
+                  ? `為保障瀏覽效能，明細顯示最新 ${detailList.length.toLocaleString()} 筆（上方統計與圖表仍涵蓋全部 ${stats.total_count.toLocaleString()} 筆資料）`
+                  : "顯示符合條件之所有紀錄"}
               </Typography>
             </div>
             {/* 💡 搜尋輸入框 */}

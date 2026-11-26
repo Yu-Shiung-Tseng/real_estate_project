@@ -6,7 +6,7 @@ import {
   ServerStackIcon,
   RectangleStackIcon,
 } from "@heroicons/react/24/solid";
-import { Home, Profile, Tables, Notifications } from "@/pages/dashboard";
+import { Home, RiskWatchPage, Profile, Tables, Notifications } from "@/pages/dashboard";
 import { AboutPage, PrivacyPolicyPage, TermsDisclaimerPage } from "@/pages/legal";
 import { SignIn, SignUp } from "@/pages/auth";
 
@@ -23,6 +23,12 @@ export const routes = [
         name: "dashboard",
         path: "/home",
         element: <Home />,
+      },
+      {
+        icon: <InformationCircleIcon {...icon} />,
+        name: "risk-watch",
+        path: "/risk-watch",
+        element: <RiskWatchPage />,
       },
       {
         icon: <InformationCircleIcon {...icon} />,
