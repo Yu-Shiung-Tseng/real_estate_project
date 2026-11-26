@@ -413,8 +413,8 @@ export function Home() {
   const currentItems = sortedData.slice(indexOfFirstItem, indexOfLastItem);
   const totalPages = Math.ceil(sortedData.length / itemsPerPage);
 
-// ==========================================
-  // 6. ECharts 配置 (已更新：雙 Y 軸與交易量柱狀圖)
+  // ==========================================
+  // 6. ECharts 配置（價量分離上下雙圖：上區專注單價與預測，下區呈現真實成交量，消除右側 Y 軸視覺干擾）
   // ==========================================
   const getTrendOption = () => {
     const districtName = activeFilters.district === "all" ? "全區" : activeFilters.district;
@@ -438,26 +438,17 @@ export function Home() {
     const forecastPad = Array(forecastPoints.length).fill(null);
     const forecastByLabel = Object.fromEntries(forecastPoints.map((p) => [p.label, p]));
 
-    const legendData = [`${districtName}交易量`, `${districtName}單價`, `${cityName}單價`];
+    const legendData = [`${districtName}單價`, `${cityName}單價`];
     if (hasValidForecast) {
-      legendData.push("AI 預測單價");
+      legendData.push("模型預測單價");
     }
+    legendData.push(`${districtName}交易量`);
 
     const series = [
       {
-        name: `${districtName}交易量`,
-        type: "bar",
-        yAxisIndex: 1,
-        data: [...trendData.map((d) => d.district_volume), ...forecastPad],
-        barMaxWidth: 35,
-        itemStyle: {
-          color: "rgba(147, 197, 253, 0.4)",
-          borderRadius: [4, 4, 0, 0],
-        },
-      },
-      {
         name: `${districtName}單價`,
         type: "line",
+        xAxisIndex: 0,
         yAxisIndex: 0,
         data: [...trendData.map((d) => d.district_avg), ...forecastPad],
         smooth: true,
@@ -468,12 +459,25 @@ export function Home() {
       {
         name: `${cityName}單價`,
         type: "line",
+        xAxisIndex: 0,
         yAxisIndex: 0,
         data: [...trendData.map((d) => d.city_avg), ...forecastPad],
         smooth: true,
         symbolSize: 6,
         lineStyle: { width: 2, type: "dashed", color: "#F44336" },
         itemStyle: { color: "#F44336" },
+      },
+      {
+        name: `${districtName}交易量`,
+        type: "bar",
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: [...trendData.map((d) => d.district_volume), ...forecastPad],
+        barMaxWidth: 30,
+        itemStyle: {
+          color: "rgba(96, 165, 250, 0.55)",
+          borderRadius: [4, 4, 0, 0],
+        },
       },
     ];
 
@@ -485,6 +489,7 @@ export function Home() {
         {
           name: "__band_lower",
           type: "line",
+          xAxisIndex: 0,
           yAxisIndex: 0,
           stack: "ai-confidence-band",
           data: [...preNulls, lastActualPrice, ...forecastPoints.map((p) => p.lower_bound)],
@@ -498,6 +503,7 @@ export function Home() {
         {
           name: "__band_upper",
           type: "line",
+          xAxisIndex: 0,
           yAxisIndex: 0,
           stack: "ai-confidence-band",
           data: [
@@ -513,8 +519,9 @@ export function Home() {
           tooltip: { show: false },
         },
         {
-          name: "AI 預測單價",
+          name: "模型預測單價",
           type: "line",
+          xAxisIndex: 0,
           yAxisIndex: 0,
           data: [...preNulls, lastActualPrice, ...forecastPoints.map((p) => p.predicted_price)],
           smooth: true,
@@ -526,7 +533,16 @@ export function Home() {
       );
     }
 
+    const formatCompactVolume = (val) => {
+      if (val >= 10000) return `${(val / 10000).toFixed(1)}萬`;
+      if (val >= 1000) return `${(val / 1000).toFixed(val % 1000 === 0 ? 0 : 1)}k`;
+      return `${val}`;
+    };
+
     return {
+      axisPointer: {
+        link: [{ xAxisIndex: "all" }],
+      },
       tooltip: {
         trigger: "axis",
         axisPointer: { type: "cross" },
@@ -535,14 +551,18 @@ export function Home() {
           const axisLabel = params[0].name;
           const isForecastQuarter = Boolean(forecastByLabel[axisLabel]);
           let res = `<div style="font-weight:bold;margin-bottom:4px;border-bottom:1px solid #ccc;padding-bottom:4px;">${axisLabel}${
-            isForecastQuarter ? ' <span style="color:#7C3AED;">(AI 預測)</span>' : ""
+            isForecastQuarter ? ' <span style="color:#7C3AED;">(模型預測)</span>' : ""
           }</div>`;
 
+          const seen = new Set();
           params.forEach((p) => {
             if (!p.seriesName || p.seriesName.startsWith("__band_") || p.value == null) return;
-            if (!isForecastQuarter && p.seriesName === "AI 預測單價") return;
+            if (seen.has(p.seriesName)) return;
+            seen.add(p.seriesName);
+            if (!isForecastQuarter && p.seriesName === "模型預測單價") return;
             const unit = p.seriesType === "bar" ? "筆" : "萬/坪";
-            res += `${p.marker} ${p.seriesName}: <span style="font-weight:bold;">${p.value} ${unit}</span><br/>`;
+            const displayVal = p.seriesType === "bar" ? Number(p.value).toLocaleString() : p.value;
+            res += `${p.marker} ${p.seriesName}: <span style="font-weight:bold;">${displayVal} ${unit}</span><br/>`;
           });
 
           if (isForecastQuarter) {
@@ -556,26 +576,52 @@ export function Home() {
       legend: {
         data: legendData,
         bottom: 0,
+        itemGap: 14,
+        textStyle: { fontSize: 12, color: "#475569" },
       },
-      grid: { left: "3%", right: "4%", bottom: "10%", containLabel: true },
-      xAxis: {
-        type: "category",
-        data: allLabels,
-        axisPointer: { type: "shadow" },
-      },
+      grid: [
+        { left: 56, right: 20, top: 36, height: "54%" },
+        { left: 56, right: 20, top: "71%", height: "17%" },
+      ],
+      xAxis: [
+        {
+          type: "category",
+          gridIndex: 0,
+          data: allLabels,
+          axisLine: { lineStyle: { color: "#cbd5e1" } },
+          axisTick: { show: false },
+          axisLabel: { show: false },
+        },
+        {
+          type: "category",
+          gridIndex: 1,
+          data: allLabels,
+          axisLine: { lineStyle: { color: "#cbd5e1" } },
+          axisLabel: { color: "#64748b", fontSize: 11 },
+          axisPointer: { type: "shadow" },
+        },
+      ],
       yAxis: [
         {
           type: "value",
+          gridIndex: 0,
           name: "單價 (萬/坪)",
-          position: "left",
+          nameTextStyle: { color: "#64748b", fontSize: 11, padding: [0, 0, 4, 0] },
+          axisLabel: { color: "#64748b", fontSize: 11 },
           splitLine: { lineStyle: { color: "#f1f5f9" } },
         },
         {
           type: "value",
-          name: "交易量 (筆)",
-          position: "right",
-          splitLine: { show: false },
-          max: (value) => Math.ceil((value.max || 10) * 4),
+          gridIndex: 1,
+          name: "成交量 (筆)",
+          nameTextStyle: { color: "#94a3b8", fontSize: 11, padding: [0, 0, 2, 0] },
+          splitNumber: 2,
+          axisLabel: {
+            color: "#94a3b8",
+            fontSize: 11,
+            formatter: formatCompactVolume,
+          },
+          splitLine: { lineStyle: { color: "#f8fafc" } },
         },
       ],
       series,
@@ -875,11 +921,12 @@ export function Home() {
         </div>
       </div>
 
-      {/* --- AI 智慧單戶估價模組 --- */}
+      {/* --- 單戶智慧行情估價模組 --- */}
       <AiValuationCard
         cities={cities}
         activeCity={activeFilters.city}
         activeDistrict={activeFilters.district}
+        initialDistricts={selectedCity === activeFilters.city ? districts : []}
         onApplyToMortgage={handleApplyAiToMortgage}
       />
 

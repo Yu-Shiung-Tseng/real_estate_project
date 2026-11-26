@@ -83,8 +83,21 @@ export function RiskWatchPage() {
         data: rows.map((r) => r.label),
       },
       yAxis: [
-        { type: "value", name: "件數 (筆)", splitLine: { lineStyle: { color: "#f1f5f9" } } },
-        { type: "value", name: "金額 (億元)", splitLine: { show: false } },
+        {
+          type: "value",
+          name: "件數 (筆)",
+          nameTextStyle: { color: "#64748b", fontSize: 11 },
+          axisLabel: { color: "#64748b", fontSize: 11 },
+          splitLine: { lineStyle: { color: "#f1f5f9" } },
+        },
+        {
+          type: "value",
+          name: "金額 (億)",
+          splitNumber: 4,
+          nameTextStyle: { color: "#94a3b8", fontSize: 11 },
+          axisLabel: { color: "#94a3b8", fontSize: 11, formatter: "{value}億" },
+          splitLine: { show: false },
+        },
       ],
       series: [
         {
@@ -150,8 +163,21 @@ export function RiskWatchPage() {
       grid: { left: "3%", right: "4%", bottom: "14%", containLabel: true },
       xAxis: { type: "category", data: rows.map((r) => r.label) },
       yAxis: [
-        { type: "value", name: "成交量 (筆)", splitLine: { lineStyle: { color: "#f1f5f9" } } },
-        { type: "value", name: "佔比 (%)", splitLine: { show: false } },
+        {
+          type: "value",
+          name: "成交量 (筆)",
+          nameTextStyle: { color: "#64748b", fontSize: 11 },
+          axisLabel: { color: "#64748b", fontSize: 11 },
+          splitLine: { lineStyle: { color: "#f1f5f9" } },
+        },
+        {
+          type: "value",
+          name: "佔比 (%)",
+          splitNumber: 4,
+          nameTextStyle: { color: "#94a3b8", fontSize: 11 },
+          axisLabel: { color: "#94a3b8", fontSize: 11, formatter: "{value}%" },
+          splitLine: { show: false },
+        },
       ],
       series: [
         {

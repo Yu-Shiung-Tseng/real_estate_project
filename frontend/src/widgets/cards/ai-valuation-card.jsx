@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardBody, Typography, Input, Button } from "@material-tailwind/react";
 import { SparklesIcon, CalculatorIcon } from "@heroicons/react/24/solid";
 import axios from "axios";
@@ -12,10 +12,14 @@ export function AiValuationCard({
   cities,
   activeCity,
   activeDistrict,
+  initialDistricts = [],
   onApplyToMortgage,
 }) {
   const [city, setCity] = useState(activeCity || "臺中市");
-  const [districts, setDistricts] = useState([]);
+  const [districts, setDistricts] = useState(initialDistricts);
+  const [isLoadingDistricts, setIsLoadingDistricts] = useState(false);
+  const [districtError, setDistrictError] = useState(false);
+
   const [district, setDistrict] = useState(activeDistrict || "all");
   const [buildingType, setBuildingType] = useState("住宅大樓");
   const [pings, setPings] = useState("35");
@@ -49,26 +53,65 @@ export function AiValuationCard({
     }
   }, [activeCity, activeDistrict]);
 
+  // 若主頁面已載入同縣市行政區，即時同步避免空白等待
+  useEffect(() => {
+    if (city === activeCity && Array.isArray(initialDistricts) && initialDistricts.length > 0) {
+      const cleaned = Array.from(new Set(initialDistricts.map((d) => String(d).trim()).filter(Boolean)));
+      setDistricts((prev) => (prev.length > 0 ? prev : cleaned));
+      setDistrictError(false);
+    }
+  }, [city, activeCity, initialDistricts]);
+
+  // 封裝可重試的行政區抓取函式（避免網路瞬間閃斷後行政區永久空白）
+  const fetchDistrictsForCity = useCallback(async (targetCity, signalObj) => {
+    if (!targetCity) return;
+    setIsLoadingDistricts(true);
+    setDistrictError(false);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await api.get("/api/districts", { params: { city: targetCity } });
+        if (signalObj?.cancelled) return;
+        const list = Array.isArray(res.data)
+          ? Array.from(new Set(res.data.map((d) => String(d).trim()).filter(Boolean)))
+          : [];
+        setDistricts(list);
+        setDistrictError(false);
+        setIsLoadingDistricts(false);
+        return;
+      } catch (err) {
+        if (signalObj?.cancelled) return;
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        } else {
+          console.error("估價器載入行政區失敗:", err);
+          setDistrictError(true);
+          setIsLoadingDistricts(false);
+        }
+      }
+    }
+  }, []);
+
   // 估價器縣市變更時即時載入行政區清單
   useEffect(() => {
-    let isCancelled = false;
-    if (city) {
-      api
-        .get("/api/districts", { params: { city } })
-        .then((res) => {
-          if (!isCancelled) setDistricts(res.data);
-        })
-        .catch(() => {});
-    }
+    const signalObj = { cancelled: false };
+    fetchDistrictsForCity(city, signalObj);
     return () => {
-      isCancelled = true;
+      signalObj.cancelled = true;
     };
-  }, [city]);
+  }, [city, fetchDistrictsForCity]);
 
   const handleCityChange = (newCity) => {
     setCity(newCity);
     setDistrict("all");
     setDistricts([]);
+  };
+
+  // 若先前因短暫斷線導致選單空白，點選行政區時自動補抓
+  const handleDistrictSelectFocus = () => {
+    if (!isLoadingDistricts && districts.length === 0 && city) {
+      fetchDistrictsForCity(city);
+    }
   };
 
   const handlePredict = async (e) => {
@@ -102,7 +145,7 @@ export function AiValuationCard({
       setResult(res.data);
     } catch (err) {
       const detail = err?.response?.data?.detail;
-      setErrorMsg(detail || "AI 估價服務暫時無法使用，請稍後再試。");
+      setErrorMsg(detail || "行情估價服務暫時無法使用，請稍後再試。");
     } finally {
       setIsPredicting(false);
     }
@@ -118,10 +161,10 @@ export function AiValuationCard({
             </div>
             <div>
               <Typography variant="h6" color="blue-gray" className="font-bold">
-                AI 單戶智慧行情估價
+                單戶行情智慧估價
               </Typography>
               <Typography variant="small" className="text-xs text-blue-gray-400">
-                基於 HistGradientBoosting 梯度提升樹模型，依實價登錄大數據推估合理單價與總價區間
+                基於 HistGradientBoosting 梯度提升樹模型，依實價登錄資料推估合理單價與總價區間
               </Typography>
             </div>
           </div>
@@ -146,8 +189,11 @@ export function AiValuationCard({
           <form onSubmit={handlePredict} className="lg:col-span-7 flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
-                <label className="block text-xs font-bold text-blue-gray-500 mb-1">縣市</label>
+                <label htmlFor="val-city-select" className="block text-xs font-bold text-blue-gray-500 mb-1">
+                  縣市
+                </label>
                 <select
+                  id="val-city-select"
                   aria-label="估價縣市"
                   className="w-full h-10 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-indigo-600 focus:outline-none cursor-pointer"
                   value={city}
@@ -162,25 +208,48 @@ export function AiValuationCard({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-blue-gray-500 mb-1">行政區</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="val-district-select" className="block text-xs font-bold text-blue-gray-500">
+                    行政區
+                  </label>
+                  {districtError && (
+                    <button
+                      type="button"
+                      onClick={() => fetchDistrictsForCity(city)}
+                      className="text-[11px] font-bold text-indigo-600 hover:underline"
+                    >
+                      重新載入
+                    </button>
+                  )}
+                </div>
                 <select
+                  id="val-district-select"
                   aria-label="估價行政區"
                   className="w-full h-10 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-indigo-600 focus:outline-none cursor-pointer"
                   value={district}
+                  onFocus={handleDistrictSelectFocus}
+                  onMouseDown={handleDistrictSelectFocus}
                   onChange={(e) => setDistrict(e.target.value)}
                 >
-                  <option value="all">全區（縣市基準）</option>
+                  <option value="all">
+                    {isLoadingDistricts && districts.length === 0
+                      ? "載入行政區中..."
+                      : "全區（縣市基準）"}
+                  </option>
                   {districts.map((d) => (
-                    <option key={d.trim()} value={d.trim()}>
-                      {d.trim()}
+                    <option key={d} value={d}>
+                      {d}
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-blue-gray-500 mb-1">建物型態</label>
+                <label htmlFor="val-type-select" className="block text-xs font-bold text-blue-gray-500 mb-1">
+                  建物型態
+                </label>
                 <select
+                  id="val-type-select"
                   aria-label="估價建物型態"
                   className="w-full h-10 px-3 border border-blue-gray-200 rounded-lg text-sm text-blue-gray-700 bg-white focus:border-indigo-600 focus:outline-none cursor-pointer"
                   value={buildingType}
@@ -237,15 +306,15 @@ export function AiValuationCard({
                 className="flex items-center gap-2 font-bold shadow-md"
               >
                 <SparklesIcon className="h-4 w-4" />
-                {isPredicting ? "AI 運算估價中..." : "開始 AI 估價"}
+                {isPredicting ? "模型運算估價中..." : "開始行情估價"}
               </Button>
               <Typography variant="small" className="text-xs text-blue-gray-400">
-                可自由調整條件估算任意房屋的合理市場單價與總價區間
+                可自由選擇任意縣市與行政區，試算合理市場單價與總價區間
               </Typography>
             </div>
           </form>
 
-          {/* 右側：AI 估價結果卡片 */}
+          {/* 右側：估價結果卡片 */}
           <div className="lg:col-span-5">
             {result ? (
               <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/70 p-5 shadow-sm flex flex-col gap-3">
@@ -262,7 +331,7 @@ export function AiValuationCard({
                 <div className="grid grid-cols-2 gap-3 border-y border-indigo-100/80 py-3">
                   <div>
                     <Typography variant="small" className="text-xs text-blue-gray-500">
-                      AI 預估合理單價
+                      預估合理單價
                     </Typography>
                     <div className="flex items-baseline gap-1 mt-0.5">
                       <Typography variant="h4" color="indigo" className="font-black">
@@ -333,7 +402,7 @@ export function AiValuationCard({
               <div className="flex min-h-[172px] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-indigo-100 bg-indigo-50/30 p-6 text-center">
                 <SparklesIcon className="mb-2 h-7 w-7 text-indigo-300" />
                 <Typography variant="small" color="blue-gray" className="font-bold opacity-70">
-                  設定房屋條件後點擊「開始 AI 估價」
+                  設定房屋條件後點擊「開始行情估價」
                 </Typography>
                 <Typography variant="small" className="mt-1 text-xs text-blue-gray-400">
                   將立即推估單價、含車位總價與 15%～85% 合理市場行情區間
