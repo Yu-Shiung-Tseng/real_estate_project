@@ -20,7 +20,8 @@ import {
   SparklesIcon,
 } from "@heroicons/react/24/solid";
 import { StatisticsCard, AiValuationCard } from "@/widgets/cards";
-import { AdBanner } from "@/widgets/layout";
+// 待 Google AdSense 審核通過後再取消註解啟用廣告元件：
+// import { AdBanner, AdPopupModal } from "@/widgets/layout";
 import axios from "axios";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -882,8 +883,9 @@ export function Home() {
         onApplyToMortgage={handleApplyAiToMortgage}
       />
 
-      {/* --- Google AdSense 合規頁面橫幅廣告位 --- */}
-      <AdBanner slotName="實價登錄分析橫幅廣告位" />
+      {/* --- Google AdSense 廣告位（待申請通過後再取消註解啟用） --- */}
+      {/* <AdPopupModal /> */}
+      {/* <AdBanner slotName="實價登錄分析橫幅廣告位" /> */}
 
       {/* --- 下半部：成交清單 (加入搜尋、排序、分頁) --- */}
       <Card className="overflow-hidden shadow-lg border border-blue-gray-100">

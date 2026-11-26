@@ -20,10 +20,10 @@ export function DashboardNavbar() {
             color="blue-gray"
             className="font-bold tracking-wide group-hover:text-blue-600 transition-colors"
           >
-            Taiwan Housing Insight Analytics
+            台灣房價儀表板
           </Typography>
-          <Typography variant="small" className="text-xs text-blue-gray-400 font-normal">
-            台灣實價登錄大數據分析與 AI 房價預測平台
+          <Typography variant="small" className="text-xs text-blue-gray-500 font-normal">
+            台灣實價登錄視覺化資料查詢與分析平台（每季同步更新）
           </Typography>
         </Link>
 
